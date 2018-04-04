@@ -12,7 +12,7 @@ Load in some packages
 ```{r}
 library(EightyR)
 load_toolbox()
-load_pkg("plumber")
+load_pkg(c("plumber","caret"))
 
 ```
 
@@ -223,24 +223,29 @@ r$run(host = "0.0.0.0", port=8000)
 
 OK, so up to now we have setup all the files we need to serve this api. Now we can ssh into a server and clone this repo over there.
 
-Remember to change the file paths in the script to suite your new machine or cd into the repository before running the script.
+Remember to change the file paths in the script to suite your new machine or cd into the repository before running the script.  
 
-For this experiment I quickly initiaited an AWS EC2 instance that we can serve the api with.
+For this experiment I quickly initiaited an AWS EC2 instance that we can serve the api with.  
+
+Note that with AWS linux you need to make sure all the dependancies are installed.  
 
 ### SSH into the server
 
 In any shell:  
 
-```{r, eval=FALSE}
+```{bash, eval=FALSE}
 ssh -i "path/My_Private_Key.pem" ec2-user@ec2{My_IP}.eu-west-1.compute.amazonaws.com
 ```
 
 Clone the repo with your code:  
 
-```{r}
-git clone repo.git
+```{bash, eval=FALSE}
+git clone origin https://github.com/lurd4862/Testing_apis_R.git
 ```
 
+Change the paths referencing your model...  
+
+Cd into the repository...  
 
 Run the process in a shell:  
 
@@ -248,7 +253,11 @@ Run the process in a shell:
 Rscript Serve_api.R
 ```
 
-test case
+You can background this process with a noup command so that the api does not stop when you leave this shell.
+
+Now that the api is running on the port we specified in the run script we can access it:  
+
+request the following test case using a json input  
 
 ```{bash,eval=FALSE}
 
