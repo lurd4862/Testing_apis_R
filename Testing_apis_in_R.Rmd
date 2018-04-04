@@ -1,0 +1,262 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+## Using plumber
+
+Load in some packages
+
+```{r}
+library(EightyR)
+load_toolbox()
+load_pkg("plumber")
+
+```
+
+In order to serve an api you need to store all the function that you want to serve inside a R script.
+
+As our "hello world" example we create a script called "hello_api.R":  
+
+```{r, eval = FALSE}
+#hello_api.R
+
+#* @get /mean
+normalMean <- function(samples=10){
+  data <- rnorm(samples)
+  mean(data)
+}
+
+#* @post /sum
+addTwo <- function(a, b){
+  as.numeric(a) + as.numeric(b)
+}
+```
+
+Notice that we use the special comments #* to denote the type of api request and also the name of the request.  
+
+We can spin up this api on a specified local port using the following R code:  
+
+```{r, eval=FALSE}
+#!/usr/bin/Rscript
+
+# run_hello_api.r
+library(EightyR)
+load_toolbox()
+load_pkg("plumber")
+
+r <- plumb("hello_api.R")  # Where 'plumber.R' is the location of the file shown above
+r$run(host = "0.0.0.0", port=8000)
+```
+
+Remember to give this file execution rights if you want to run it using ./!  
+We will run this through a process using the following bash code:
+
+```{r, eval=FALSE}
+./run_hello_api.r 
+```
+
+Now that this process is running we can make some requests:  
+
+```{bash, eval=FALSE}
+curl "http://127.0.0.1:8000/mean"
+```
+
+`[-0.2278]`  
+
+Providing a parameter using `?var=` syntax:  
+
+```{bash, eval=FALSE}
+curl "http://127.0.0.1:8000/mean?samples=10000"
+```
+
+`[0.007]`  
+
+Making a request using `"a=&b="`  syntax:  
+
+```{bash, eval=FALSE}
+curl --data "a=4&b=3" "http://127.0.0.1:8000/sum"
+```
+
+`[7]`  
+
+Using JSON syntax:  
+
+```{bash, eval=FALSE}
+curl --data '{"a":4, "b":5}' http://127.0.0.1:8000/sum
+```
+
+`[9]`  
+
+Make sure to close the job when you are done testing the api!  
+
+## Hosting the api
+
+So now that we know how to use the plumer package let's get our hands dirty...  
+
+### Create a basic model
+
+For our practical example we will build a basic caret rergession model and service it via an api so that someone can request a prediction by giving properly named inputs for the model.  
+
+Let's predict how long an animal will sleep given some descriptors of said animal
+
+What the data looks like:  
+
+```{r}
+example_data <- 
+ggplot2::msleep %>% 
+	select(sleep_total,vore,bodywt,brainwt,awake) %>% 
+	na.omit()
+
+example_data
+```
+
+Construct a naive model  
+
+```{r}
+example_model <-  
+	caret::train(form = sleep_total~., data = example_data,method = "rf")
+
+example_model %>% saveRDS("data/example_model.rds")
+
+example_model
+```
+
+Simple enough to train on this data and without any tuning we can assume a margin of error less than 1/2 an hour...  
+
+### Create the api
+
+OK, so we need to first define the `plumber.R` file that we will serve.  
+
+Notice that we can define the template very verbosely so that we can both leverage the GET protocol to feedback some characteristics and to populate the HTML page should a user inspect the api to learn how to use it.  
+
+```{r,eval=FALSE}
+# script name:
+# plumber.R
+
+# set API title and description to show up in curl "http://127.0.0.1:8000/mean"/__swagger__/
+#' @apiTitle Run predictions for the total hours of sleep of an animal
+#' @apiDescription This API takes various animal's data on factors related to sleep and predicts how long the animal will sleep on its next cycle.
+#' indicates hours of sleep
+
+# load model
+# this path would have to be adapted if you would deploy this
+# load("/Users/shiringlander/Documents/Github/shirinsplayground/data/model_rf.RData")
+readRDS("/usr/etc/learning_api_in_R/data/example_model.rds")
+
+#' Log system time, request method and HTTP user agent of the incoming request
+#' @filter logger
+function(req){
+  cat("System time:", as.character(Sys.time()), "\n",
+      "Request method:", req$REQUEST_METHOD, req$PATH_INFO, "\n",
+      "HTTP user agent:", req$HTTP_USER_AGENT, "@", req$REMOTE_ADDR, "\n")
+  plumber::forward()
+}
+
+# core function follows below:
+# define parameters with type and description
+# name endpoint
+# return output as html/text
+# specify 200 (okay) return
+
+#' predict Chronic Kidney Disease of test case with Random Forest model
+#' @param	vore Character variable. Options are : carni, herbi, insecti, omni.
+#' @param	bodywt:numeric Numeric variable. Weight in lb of the animal.
+#' @param	brainwt:numeric Numeric variable. Weight in lb of the animal.
+#' @param	awake:numeric Numeric variable. Time animal has been awake.
+#' @post /predict
+#' @html
+#' @response 200 Returns the hour(s) prediction from the Random Forest model predicting hours of next sleep
+calculate_prediction <- function(vore,bodywt,brainwt,awake) {
+  
+  # make data frame from parameters
+  input_data <<- data.frame(vore,bodywt,brainwt,awake,
+														stringsAsFactors = FALSE)
+  
+  input_data <- 
+  	input_data %>% 
+  	mutate(
+  		vore = vore %>% as.numeric(),
+			bodywt = bodywt %>% as.numeric(),
+			brainwt = brainwt %>% as.numeric(),
+			awake = awake %>% as.numeric()
+  	)
+  
+  # and make sure they really are the right format
+  if(all(input_data["vore"] %>% class != "character")){
+  	res$status <- 400
+    res$body <- "Parameters have to be in the right format. vore - character"
+  }
+  
+  if( all(input_data[c("bodywt","brainwt","awake")] %>% class != "numeric") ){
+  	res$status <- 400
+    res$body <- "Parameters have to be in the right format. vore - character"
+  }
+  
+  # validation for parameter
+  if (any(is.na(input_data))) {
+    res$status <- 400
+    res$body <- "Parameters have to be numeric or integers - NA's intriduced by coercion"
+  }
+
+  # predict and return result
+  pred_rf <<- predict(example_model, input_data)
+  paste("----------------\nNext sleep cycle predicted to be", as.character(pred_rf), "\n----------------\n")
+}
+```
+
+Setup executable script for the server to execute:  
+
+Let's call this `Serve_api.R`  
+
+```{r, eval=FALSE}
+#!/usr/bin/env R
+library(EightyR)
+load_toolbox()
+load_pkg("plumber")
+r <- plumb("plumber.R")
+r$run(host = "0.0.0.0", port=8000)
+
+```
+
+OK, so up to now we have setup all the files we need to serve this api. Now we can ssh into a server and clone this repo over there.
+
+Remember to change the file paths in the script to suite your new machine or cd into the repository before running the script.
+
+For this experiment I quickly initiaited an AWS EC2 instance that we can serve the api with.
+
+### SSH into the server
+
+In any shell:  
+
+```{r, eval=FALSE}
+ssh -i "path/My_Private_Key.pem" ec2-user@ec2{My_IP}.eu-west-1.compute.amazonaws.com
+```
+
+Clone the repo with your code:  
+
+```{r}
+git clone repo.git
+```
+
+
+Run the process in a shell:  
+
+```{bash,eval=FALSE}
+Rscript Serve_api.R
+```
+
+test case
+
+```{bash,eval=FALSE}
+
+curl -H "Content-Type: application/json" -X GET -d '{"vore":"carni", "bodywt":85, "brainwt":0.325, "awake":17.8}' http://127.0.0.1:8000/predict
+
+```
+
+`Next sleep cycle predicted to be 10.9981933333333`
+
+
+
